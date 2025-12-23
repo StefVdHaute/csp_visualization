@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CSP over CAN Visualizer (CFP)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;400;600&display=swap');
+        
+        body { font-family: 'Inter', sans-serif; background-color: #0f172a; color: #e2e8f0; }
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        .frame-item.active {
+            border-color: #3b82f6;
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+
+        /* Unified Grid Styles */
+        .viz-grid {
+            display: grid;
+            gap: 1px;
+            font-family: 'JetBrains Mono', monospace;
+            padding-bottom: 2px;
+            position: relative;
+        }
+        
+        .grid-hex {
+            grid-row: 1;
+            text-align: center;
+            font-size: 10px;
+            color: #94a3b8;
+            font-weight: bold;
+            letter-spacing: -1px;
+            margin-bottom: 2px;
+        }
+
+        .grid-bit {
+            grid-row: 2;
+            text-align: center;
+            font-size: 10px;
+            font-weight: 700;
+            color: white; 
+            padding: 6px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .grid-label {
+            grid-row: 3;
+            text-align: center;
+            font-size: 9px;
+            border-top: 3px solid; 
+            padding-top: 4px;
+            margin-top: 2px;
+            opacity: 0.9;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .grid-val {
+            grid-row: 4;
+            text-align: center;
+            font-size: 10px;
+            font-weight: bold;
+            padding-top: 2px;
+        }
+
+        /* Dedicated Separator Line */
+        .grid-sep-line {
+            grid-row: 1 / -1; /* Span all rows */
+            border-left: 1px solid #fbbf24; /* Bright Amber */
+            pointer-events: none;
+            z-index: 50;
+            margin-left: -1px; /* Align exactly on gap */
+            opacity: 0.6;
+        }
+
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #3b82f6;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #3b82f6;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center py-10 px-4">
+
+    <!-- Header -->
+    <header class="text-center mb-10 max-w-2xl">
+        <h1 class="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent mb-2">
+            CSP over CAN (CFP)
+        </h1>
+        <p class="text-slate-400 text-sm md:text-base">
+            Visualize the <strong>CAN Fragmentation Protocol (CFP)</strong> header mapping.
+        </p>
+    </header>
+
+    <main class="w-full max-w-7xl gap-6 grid grid-cols-1 lg:grid-cols-12">
+        
+        <!-- Controls Panel (Left) -->
+        <div class="lg:col-span-4 space-y-6">
+            
+            <!-- Main Configuration -->
+            <div class="bg-slate-800/50 border border-slate-700 rounded-xl p-6 shadow-xl backdrop-blur-sm">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-semibold text-white flex items-center gap-2">Configuration</h2>
+                    
+                    <!-- Version Toggle -->
+                    <div class="bg-slate-900 p-1 rounded-lg flex text-xs font-bold font-mono">
+                        <button id="btnV1" onclick="setVersion(1)" class="px-3 py-1 rounded bg-blue-600 text-white transition-all">v1.x</button>
+                        <button id="btnV2" onclick="setVersion(2)" class="px-3 py-1 rounded text-slate-400 hover:text-white transition-all">v2.x</button>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg border border-slate-700 mb-4">
+                    <span class="text-xs font-bold text-slate-400 uppercase tracking-wider">Input Mode</span>
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs text-slate-400 font-mono">Dec/Text</label>
+                        <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" name="toggle" id="hexToggle" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 appearance-none cursor-pointer transition-all duration-300 left-0 border-slate-600"/>
+                            <label for="hexToggle" class="toggle-label block overflow-hidden h-5 rounded-full bg-slate-600 cursor-pointer"></label>
+                        </div>
+                        <label class="text-xs text-blue-400 font-bold font-mono">Hex</label>
+                    </div>
+                </div>
+
+                <form id="cspForm" class="space-y-4">
+                    <!-- CSP Header Details -->
+                    <div class="p-3 bg-slate-900/50 rounded-lg border border-slate-700 space-y-3">
+                        <h3 class="text-xs text-slate-400 font-bold uppercase border-b border-slate-700 pb-1 mb-2">CSP Header (Transport)</h3>
+                        
+                        <!-- Priority -->
+                        <div>
+                            <label class="block text-xs uppercase tracking-wider text-rose-400 font-bold mb-1">Priority</label>
+                            <input type="range" id="priority" min="0" max="3" value="2" class="w-full accent-rose-500 h-2 bg-slate-700 rounded-lg appearance-none">
+                            <div class="text-right text-[10px] text-rose-300 font-mono" id="prioVal">2</div>
+                        </div>
+
+                        <!-- Addresses -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs uppercase tracking-wider text-blue-400 font-bold mb-1">Source (<span id="srcBitsLabel">5</span>b)</label>
+                                <input type="text" id="srcAddr" value="1" class="w-full bg-slate-800 border border-slate-600 rounded p-1.5 text-blue-300 font-mono text-sm focus:outline-none focus:border-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs uppercase tracking-wider text-emerald-400 font-bold mb-1">Dest (<span id="dstBitsLabel">5</span>b)</label>
+                                <input type="text" id="dstAddr" value="14" class="w-full bg-slate-800 border border-slate-600 rounded p-1.5 text-emerald-300 font-mono text-sm focus:outline-none focus:border-emerald-500">
+                            </div>
+                        </div>
+
+                        <!-- Ports -->
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs uppercase tracking-wider text-purple-400 font-bold mb-1">Src Port (6b)</label>
+                                <input type="text" id="srcPort" value="24" class="w-full bg-slate-800 border border-slate-600 rounded p-1.5 text-purple-300 font-mono text-sm focus:outline-none focus:border-purple-500">
+                                <div class="text-right text-[10px] text-slate-500" id="srcPortDisplay">0x18</div>
+                            </div>
+                            <div>
+                                <label class="block text-xs uppercase tracking-wider text-amber-400 font-bold mb-1">Dst Port (6b)</label>
+                                <input type="text" id="dstPort" value="63" class="w-full bg-slate-800 border border-slate-600 rounded p-1.5 text-amber-300 font-mono text-sm focus:outline-none focus:border-amber-500">
+                                <div class="text-right text-[10px] text-slate-500" id="dstPortDisplay">0x3F</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Payload -->
+                    <div>
+                        <div class="flex justify-between items-end mb-1">
+                            <label class="block text-xs uppercase tracking-wider text-slate-300 font-bold">Packet Payload</label>
+                            <span class="text-[10px] text-slate-500" id="payloadModeHint">Text Mode</span>
+                        </div>
+                        <textarea id="payload" rows="3" class="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white font-mono text-sm resize-none focus:outline-none focus:border-slate-500" placeholder="Enter long text...">Hello World</textarea>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Right Panel: Visualizations -->
+        <div class="lg:col-span-8 space-y-6">
+            
+            <!-- 1. CAN ID Visualization (Big Panel) -->
+            <div class="bg-slate-800/80 border border-slate-700 rounded-xl p-6 shadow-xl relative overflow-hidden">
+                <div class="absolute top-0 right-0 bg-slate-700 text-xs px-3 py-1 rounded-bl-xl text-slate-300">29-Bit Extended CAN Identifier</div>
+                
+                <!-- Big Hex Display -->
+                <div class="flex flex-col md:flex-row justify-between items-end mb-6 border-b border-slate-700 pb-4">
+                    <div>
+                        <h3 class="text-lg font-semibold text-white">CAN ID (CFP Header)</h3>
+                        <span id="currentFrameInfo" class="text-xs font-mono text-slate-400">Frame 0 (BEGIN)</span>
+                    </div>
+                    <div class="text-4xl md:text-5xl font-mono text-cyan-400 font-bold tracking-tight" id="largeCanId">
+                        0x00000000
+                    </div>
+                </div>
+                
+                <!-- Grid -->
+                <div class="w-full overflow-x-auto pb-6">
+                    <div class="min-w-[600px] pt-2">
+                        <div id="canIdGrid" class="viz-grid"></div>
+                    </div>
+                </div>
+
+                <!-- Detailed Field Definitions -->
+                <h4 class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Field Definitions</h4>
+                <div id="fieldExplanation" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-400 bg-slate-900/50 p-4 rounded-lg border border-slate-800">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- 2. CSP Header Payload Detail -->
+            <div id="cspHeaderDetailContainer" class="bg-slate-900/80 border border-slate-700 rounded-xl p-6 shadow-lg overflow-hidden">
+                <div class="flex justify-between items-start mb-4">
+                    <h3 class="text-yellow-500 font-bold text-sm uppercase tracking-wider flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        <span id="headerVizTitle">CSP v1.x Header Breakdown (Payload)</span>
+                    </h3>
+                    <div class="flex flex-col items-end">
+                         <div class="bg-slate-800 border border-slate-600 px-2 py-1 rounded text-xs">
+                             <span class="text-slate-400">DLC:</span> <span class="text-white font-mono font-bold" id="headerDlcVal">8</span>
+                         </div>
+                         <span class="text-[10px] text-slate-500 mt-0.5" id="bytesInfo">Bytes: 4 (Hdr) + 2 (Len) + 2 (Data)</span>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto pb-4">
+                    <div class="min-w-[600px] bg-slate-950/50 p-4 rounded border border-slate-800 pt-6">
+                        <div id="cspHeaderGrid" class="viz-grid"></div>
+                    </div>
+                </div>
+                
+                <p id="headerDesc" class="text-[10px] text-slate-500 mt-2 text-center">
+                    The 32-bit CSP header is packed into the first 4 bytes of the Data Payload.
+                </p>
+            </div>
+
+            <!-- 3. Frame Table -->
+            <div class="bg-slate-800/50 border border-slate-700 rounded-xl overflow-hidden shadow-xl">
+                <div class="p-4 border-b border-slate-700 flex justify-between items-center bg-slate-900/50">
+                    <h3 class="font-bold text-white">Generated Frame Sequence</h3>
+                    <span class="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-cyan-400" id="frameCount">0 Frames</span>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-sm">
+                        <thead class="bg-slate-900 text-slate-400 font-mono text-xs uppercase">
+                            <tr>
+                                <th class="px-4 py-3">#</th>
+                                <th class="px-4 py-3">Type / Flags</th>
+                                <th class="px-4 py-3">CAN ID (29-bit)</th>
+                                <th class="px-4 py-3 text-center">DLC</th>
+                                <th class="px-4 py-3">Data Payload (Hex)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="frameTableBody" class="divide-y divide-slate-700/50"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Legend for Payload Colors -->
+            <div class="flex gap-4 text-xs justify-end px-2">
+                <div class="flex items-center gap-1.5"><span class="w-3 h-3 bg-yellow-600 rounded border border-yellow-500"></span> CSP Header</div>
+                <div class="flex items-center gap-1.5"><span class="w-3 h-3 bg-purple-600 rounded border border-purple-500"></span> Length</div>
+                <div class="flex items-center gap-1.5"><span class="w-3 h-3 bg-slate-700 rounded border border-slate-600"></span> Data</div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // DOM Elements
+        const inputs = {
+            priority: document.getElementById('priority'),
+            srcAddr: document.getElementById('srcAddr'),
+            dstAddr: document.getElementById('dstAddr'),
+            srcPort: document.getElementById('srcPort'),
+            dstPort: document.getElementById('dstPort'),
+            payload: document.getElementById('payload'),
+            hexToggle: document.getElementById('hexToggle')
+        };
+        const displays = {
+            canIdGrid: document.getElementById('canIdGrid'),
+            srcBitsLabel: document.getElementById('srcBitsLabel'),
+            dstBitsLabel: document.getElementById('dstBitsLabel'),
+            btnV1: document.getElementById('btnV1'),
+            btnV2: document.getElementById('btnV2'),
+            frameTableBody: document.getElementById('frameTableBody'),
+            frameCount: document.getElementById('frameCount'),
+            currentFrameInfo: document.getElementById('currentFrameInfo'),
+            largeCanId: document.getElementById('largeCanId'),
+            prioVal: document.getElementById('prioVal'),
+            headerVizTitle: document.getElementById('headerVizTitle'),
+            cspHeaderGrid: document.getElementById('cspHeaderGrid'),
+            headerDlcVal: document.getElementById('headerDlcVal'),
+            bytesInfo: document.getElementById('bytesInfo'),
+            headerDesc: document.getElementById('headerDesc'),
+            payloadModeHint: document.getElementById('payloadModeHint'),
+            srcPortDisplay: document.getElementById('srcPortDisplay'),
+            dstPortDisplay: document.getElementById('dstPortDisplay'),
+            fieldExplanation: document.getElementById('fieldExplanation')
+        };
+
+        let currentVersion = 1;
+        let generatedFrames = [];
+        let selectedFrameIndex = 0;
+        let isHexMode = false;
+
+        // --- Configuration Constants ---
+        
+        // CAN ID V1: SRC(5)|DST(5)|TYP(1)|REM(8)|ID(10)
+        const CAN_ID_V1 = [
+            { name: "SRC", bits: 5, color: "bg-blue-600", desc: "Source Node Address (5b)" },
+            { name: "DST", bits: 5, color: "bg-emerald-600", desc: "Destination Node Address (5b)" },
+            { name: "TYPE", bits: 1, color: "bg-rose-600", desc: "Frame Type (0=Begin, 1=More)" },
+            { name: "REM", bits: 8, color: "bg-amber-600", desc: "Remaining Frames Count" },
+            { name: "FID", bits: 10, color: "bg-purple-600", desc: "Packet ID (Reassembly)" }
+        ];
+
+        // CAN ID V2: PRI(2)|DST(14)|SND(6)|PKT(2)|FRM(3)|BEG(1)|END(1)
+        const CAN_ID_V2 = [
+            { name: "PRI", bits: 2, color: "bg-rose-600", desc: "Priority (0=Critical, 3=Low)" },
+            { name: "DST", bits: 14, color: "bg-emerald-600", desc: "Destination Address (14b)" },
+            { name: "SND", bits: 6, color: "bg-blue-600", desc: "Sender (LSB 6 bits of Src)" },
+            { name: "PKT", bits: 2, color: "bg-slate-500", desc: "Packet Count (Rolling)" },
+            { name: "FRM", bits: 3, color: "bg-amber-600", desc: "Frame Index (Mod 8)" },
+            { name: "BEG", bits: 1, color: "bg-green-600", desc: "Begin Flag (1=Start)" },
+            { name: "END", bits: 1, color: "bg-red-600", desc: "End Flag (1=Last)" }
+        ];
+
+        // Payload Header V1 (32 bits)
+        const PAYLOAD_V1 = [
+            { name: "PRI", bits: 2, color: "bg-rose-600" },
+            { name: "SRC", bits: 5, color: "bg-blue-600" },
+            { name: "DST", bits: 5, color: "bg-emerald-600" },
+            { name: "DPORT", bits: 6, color: "bg-amber-600" },
+            { name: "SPORT", bits: 6, color: "bg-purple-600" },
+            { name: "RES", bits: 4, color: "bg-slate-600" },
+            { name: "FLAG", bits: 4, color: "bg-slate-500" }
+        ];
+
+        // Payload Header V2 (32 bits) - Custom 4 Byte header
+        const PAYLOAD_V2 = [
+            { name: "SRC", bits: 14, color: "bg-blue-600" },
+            { name: "DPORT", bits: 6, color: "bg-amber-600" },
+            { name: "SPORT", bits: 6, color: "bg-purple-600" },
+            { name: "FLAG", bits: 6, color: "bg-slate-500" }
+        ];
+
+        // --- Main Functions ---
+
+        function setVersion(ver) {
+            currentVersion = ver;
+            
+            displays.btnV1.className = ver === 1 ? "px-3 py-1 rounded bg-blue-600 text-white transition-all" : "px-3 py-1 rounded text-slate-400 hover:text-white transition-all";
+            displays.btnV2.className = ver === 2 ? "px-3 py-1 rounded bg-blue-600 text-white transition-all" : "px-3 py-1 rounded text-slate-400 hover:text-white transition-all";
+
+            // Update limits and UI text
+            if(ver === 1) {
+                displays.srcBitsLabel.innerText = "5";
+                displays.dstBitsLabel.innerText = "5";
+                displays.headerVizTitle.innerText = "CSP v1.x Header Breakdown (Payload)";
+                displays.headerDesc.innerText = "The 32-bit CSP header is packed into the first 4 bytes of the Data Payload.";
+                
+                // Clamp values if switching back
+                if(getNumericValue(inputs.srcAddr) > 31) setNumericValue(inputs.srcAddr, 31);
+                if(getNumericValue(inputs.dstAddr) > 31) setNumericValue(inputs.dstAddr, 31);
+            } else {
+                displays.srcBitsLabel.innerText = "14";
+                displays.dstBitsLabel.innerText = "14";
+                displays.headerVizTitle.innerText = "CSP v2.x Header Breakdown (Payload)";
+                displays.headerDesc.innerText = "CSP 2.0 uses 4 bytes in the first CAN fragment for Source (14), DPort(6), SPort(6), Flags(6).";
+                
+                if(getNumericValue(inputs.srcAddr) > 16383) setNumericValue(inputs.srcAddr, 16383);
+                if(getNumericValue(inputs.dstAddr) > 16383) setNumericValue(inputs.dstAddr, 16383);
+            }
+
+            // Update Field Breakdown List
+            const fields = (ver === 1) ? CAN_ID_V1 : CAN_ID_V2;
+            displays.fieldExplanation.innerHTML = '';
+            fields.forEach(f => {
+                const item = document.createElement('div');
+                item.className = 'flex items-center gap-2';
+                // Map bg color to text color for the label
+                const textColor = f.color.replace('bg-', 'text-').replace('-600', '-400').replace('-500', '-300');
+                item.innerHTML = `<div class="w-3 h-3 ${f.color} rounded-sm flex-shrink-0 shadow-sm border border-white/20"></div><div class="flex flex-col leading-tight"><span class="font-bold ${textColor}">${f.name}</span><span class="text-[10px] text-slate-500">${f.desc}</span></div>`;
+                displays.fieldExplanation.appendChild(item);
+            });
+
+            recalcFrames();
+        }
+
+        function recalcFrames() {
+            generatedFrames = [];
+            const payloadBytes = getPayloadBytes();
+            const totalBytes = payloadBytes.length;
+            
+            const src = getNumericValue(inputs.srcAddr) || 0;
+            const dst = getNumericValue(inputs.dstAddr) || 0;
+            const fid = 42; 
+            const pri = parseInt(inputs.priority.value) || 0;
+
+            displays.prioVal.innerText = pri;
+            const sP = getNumericValue(inputs.srcPort);
+            const dP = getNumericValue(inputs.dstPort);
+            displays.srcPortDisplay.innerText = "0x" + sP.toString(16).toUpperCase();
+            displays.dstPortDisplay.innerText = "0x" + dP.toString(16).toUpperCase();
+
+            // Store input state for ID calculation
+            const inputsData = { pri };
+
+            let headerObj;
+
+            if (currentVersion === 1) {
+                headerObj = getCspV1HeaderBytes();
+                renderGrid(displays.cspHeaderGrid, headerObj.bigInt, PAYLOAD_V1, 32);
+
+                let bytesRemaining = totalBytes;
+                let offset = 0;
+
+                // V1 Frame 0: Header(4) + Length(2) + Data(2)
+                let chunkSize = Math.min(bytesRemaining, 2); 
+                displays.headerDlcVal.innerText = 4 + 2 + chunkSize;
+                displays.bytesInfo.innerText = `Bytes: 4 (Hdr) + 2 (Len) + ${chunkSize} (Data)`;
+
+                const cspTotalLength = totalBytes;
+                const lenByte0 = (cspTotalLength >> 8) & 0xFF;
+                const lenByte1 = cspTotalLength & 0xFF;
+
+                generatedFrames.push({
+                    type: 0, dataStart: offset, dataLen: chunkSize, isBegin: true, 
+                    headerBytes: headerObj.bytes, lengthBytes: [lenByte0, lenByte1], remain: 0, fid: fid, src, dst
+                });
+                bytesRemaining -= chunkSize; offset += chunkSize;
+
+                while (bytesRemaining > 0) {
+                    chunkSize = Math.min(bytesRemaining, 8);
+                    generatedFrames.push({
+                        type: 1, dataStart: offset, dataLen: chunkSize, isBegin: false, 
+                        headerBytes: [], lengthBytes: [], remain: 0, fid: fid, src, dst
+                    });
+                    bytesRemaining -= chunkSize; offset += chunkSize;
+                }
+                const totalFrames = generatedFrames.length;
+                generatedFrames.forEach((f, i) => f.remain = Math.max(0, totalFrames - 1 - i));
+
+            } else {
+                // V2 Logic
+                headerObj = getCspV2PayloadHeaderBytes();
+                renderGrid(displays.cspHeaderGrid, headerObj.bigInt, PAYLOAD_V2, 32);
+
+                let bytesRemaining = totalBytes;
+                let offset = 0;
+                
+                // V2 Frame 0: 4-byte Header + 4-byte Data (No Length field in this custom spec)
+                let chunkSize = Math.min(bytesRemaining, 4); 
+                displays.headerDlcVal.innerText = 4 + chunkSize;
+                displays.bytesInfo.innerText = `Bytes: 4 (Hdr) + ${chunkSize} (Data)`;
+
+                generatedFrames.push({
+                    isBegin: true, isEnd: (bytesRemaining <= 4), 
+                    dataStart: offset, dataLen: chunkSize,
+                    headerBytes: headerObj.bytes, lengthBytes: [], 
+                    frameCnt: 0, src, dst
+                });
+                bytesRemaining -= chunkSize; offset += chunkSize;
+
+                let fCnt = 1;
+                while (bytesRemaining > 0) {
+                    chunkSize = Math.min(bytesRemaining, 8);
+                    // Determine if this is the last frame
+                    const isLast = (bytesRemaining <= 8);
+                    generatedFrames.push({
+                        isBegin: false, isEnd: isLast,
+                        dataStart: offset, dataLen: chunkSize,
+                        headerBytes: [], lengthBytes: [], 
+                        frameCnt: fCnt % 8, src, dst
+                    });
+                    bytesRemaining -= chunkSize; offset += chunkSize;
+                    fCnt++;
+                }
+            }
+
+            generatedFrames.forEach(f => {
+                f.canId = calculateCanId(f, inputsData);
+            });
+
+            renderTable(payloadBytes);
+            if(generatedFrames.length > 0) updateBitViz(0);
+        }
+
+        // --- Bit Grid Rendering ---
+        function renderGrid(container, bigIntValue, fields, totalBits) {
+            container.innerHTML = '';
+            container.style.gridTemplateColumns = `repeat(${totalBits}, minmax(14px, 1fr))`;
+
+            const getHexNibble = (startBit) => {
+                const shift = BigInt(startBit);
+                const nibble = Number((bigIntValue >> shift) & 0xFn);
+                return nibble.toString(16).toUpperCase();
+            };
+
+            let fieldIndex = 0;
+            let fieldBitsLeft = fields[0].bits;
+            
+            for (let i = 0; i < totalBits; i++) {
+                const bitPos = totalBits - 1 - i; 
+                const bitVal = (bigIntValue >> BigInt(bitPos)) & 1n;
+                const currentField = fields[fieldIndex];
+
+                const isNibbleStart = (bitPos % 4 === 3);
+                
+                // --- SEPARATOR (Explicit Grid Item) ---
+                // Add separator to the LEFT of the current column if this is the start of a nibble
+                // And it's not the leftmost edge (index 0)
+                if (isNibbleStart && i !== 0) {
+                    const sepDiv = document.createElement('div');
+                    sepDiv.className = 'grid-sep-line';
+                    sepDiv.style.gridColumn = `${i + 1}`; // Place at current column
+                    container.appendChild(sepDiv);
+                }
+
+                // 1. Hex
+                const hexDiv = document.createElement('div');
+                hexDiv.className = 'grid-hex';
+                hexDiv.style.gridColumnStart = `${i + 1}`;
+                
+                const isTopPartial = (bitPos === totalBits - 1 && bitPos % 4 !== 3);
+
+                if (isNibbleStart) {
+                    hexDiv.style.gridColumnEnd = `span 4`;
+                    hexDiv.innerText = getHexNibble(bitPos - 3);
+                    container.appendChild(hexDiv);
+                } else if (isTopPartial) {
+                    const span = (bitPos % 4) + 1;
+                    const shift = BigInt(bitPos - (bitPos % 4)); 
+                    const topVal = Number((bigIntValue >> shift) & BigInt(Math.pow(2, span) - 1));
+                    hexDiv.style.gridColumnEnd = `span ${span}`;
+                    hexDiv.innerText = topVal.toString(16).toUpperCase();
+                    container.appendChild(hexDiv);
+                }
+
+                // 2. Bit
+                const bitDiv = document.createElement('div');
+                bitDiv.className = `grid-bit ${currentField.color}`;
+                bitDiv.style.gridColumnStart = `${i + 1}`;
+                bitDiv.innerText = bitVal;
+                container.appendChild(bitDiv);
+
+                // 3. Label
+                if (fieldBitsLeft === currentField.bits) {
+                    const labelDiv = document.createElement('div');
+                    labelDiv.className = `grid-label`;
+                    labelDiv.style.gridColumnStart = `${i + 1}`;
+                    labelDiv.style.gridColumnEnd = `span ${currentField.bits}`;
+                    
+                    const colorMap = { "bg-rose-600": "#e11d48", "bg-blue-600": "#2563eb", "bg-emerald-600": "#059669", "bg-amber-600": "#d97706", "bg-purple-600": "#9333ea", "bg-slate-500": "#64748b", "bg-slate-600": "#475569", "bg-green-600": "#16a34a", "bg-red-600": "#dc2626" };
+                    labelDiv.style.borderTopColor = colorMap[currentField.color] || "#cbd5e1";
+                    labelDiv.style.color = "#94a3b8"; 
+                    labelDiv.innerText = currentField.name;
+                    container.appendChild(labelDiv);
+                }
+
+                // 4. Value
+                if (fieldBitsLeft === currentField.bits) {
+                    const valDiv = document.createElement('div');
+                    valDiv.className = `grid-val`;
+                    valDiv.style.color = "#e2e8f0";
+                    valDiv.style.gridColumnStart = `${i + 1}`;
+                    valDiv.style.gridColumnEnd = `span ${currentField.bits}`;
+                    
+                    let shift = 0;
+                    for(let k=fieldIndex+1; k<fields.length; k++) shift += fields[k].bits;
+                    const val = (bigIntValue >> BigInt(shift)) & (BigInt(Math.pow(2, currentField.bits)) - 1n);
+                    
+                    let valStr = val.toString();
+                    if (currentField.bits > 4 || ["DST","SRC","SND"].includes(currentField.name)) {
+                        valStr = "0x" + val.toString(16).toUpperCase();
+                    }
+                    valDiv.innerText = valStr;
+                    container.appendChild(valDiv);
+                }
+
+                fieldBitsLeft--;
+                if (fieldBitsLeft === 0) {
+                    fieldIndex++;
+                    if (fieldIndex < fields.length) fieldBitsLeft = fields[fieldIndex].bits;
+                }
+            }
+        }
+
+        // --- Logic Implementations ---
+
+        function calculateCanId(frameData, inputsData) {
+            let canId = 0;
+            if (currentVersion === 1) {
+                const { src, dst, type, remain, fid } = frameData;
+                canId = (src & 0x1F) * Math.pow(2, 24); 
+                canId += (dst & 0x1F) * Math.pow(2, 19);
+                canId += (type & 0x1) * Math.pow(2, 18);
+                canId += (remain & 0xFF) * Math.pow(2, 10);
+                canId += (fid & 0x3FF);
+            } else {
+                const pri = inputsData.pri & 0x3;
+                const dst = frameData.dst & 0x3FFF;
+                const snd = frameData.src & 0x3F;
+                const pktCnt = 0;
+                const frmCnt = frameData.frameCnt & 0x7;
+                const beg = frameData.isBegin ? 1 : 0;
+                const end = frameData.isEnd ? 1 : 0;
+
+                canId = pri * Math.pow(2, 27);
+                canId += dst * Math.pow(2, 13);
+                canId += snd * Math.pow(2, 7);
+                canId += pktCnt * Math.pow(2, 5);
+                canId += frmCnt * Math.pow(2, 2);
+                canId += beg * Math.pow(2, 1);
+                canId += end * Math.pow(2, 0);
+            }
+            return canId;
+        }
+
+        function getCspV1HeaderBytes() {
+            const pri = BigInt(inputs.priority.value || 0);
+            const src = BigInt(getNumericValue(inputs.srcAddr) || 0);
+            const dst = BigInt(getNumericValue(inputs.dstAddr) || 0);
+            const sport = BigInt(getNumericValue(inputs.srcPort) || 0);
+            const dport = BigInt(getNumericValue(inputs.dstPort) || 0);
+            const flags = 0n;
+
+            let header = 0n;
+            header |= (pri & 0x3n) << 30n;
+            header |= (src & 0x1Fn) << 25n;
+            header |= (dst & 0x1Fn) << 20n;
+            header |= (dport & 0x3Fn) << 14n;
+            header |= (sport & 0x3Fn) << 8n;
+            header |= (flags & 0xFFn);
+            
+            const b0 = Number((header >> 24n) & 0xFFn);
+            const b1 = Number((header >> 16n) & 0xFFn);
+            const b2 = Number((header >> 8n) & 0xFFn);
+            const b3 = Number(header & 0xFFn);
+            return { bigInt: header, bytes: [b0, b1, b2, b3], bits: 32 };
+        }
+
+        function getCspV2PayloadHeaderBytes() {
+            const src = BigInt(getNumericValue(inputs.srcAddr) || 0);
+            const sport = BigInt(getNumericValue(inputs.srcPort) || 0);
+            const dport = BigInt(getNumericValue(inputs.dstPort) || 0);
+            const flags = 0n;
+
+            let header = 0n;
+            header |= (src & 0x3FFFn) << 18n;
+            header |= (dport & 0x3Fn) << 12n;
+            header |= (sport & 0x3Fn) << 6n;
+            header |= (flags & 0x3Fn);
+
+            const b0 = Number((header >> 24n) & 0xFFn);
+            const b1 = Number((header >> 16n) & 0xFFn);
+            const b2 = Number((header >> 8n) & 0xFFn);
+            const b3 = Number(header & 0xFFn);
+            return { bigInt: header, bytes: [b0, b1, b2, b3], bits: 32 };
+        }
+
+        // --- Render Frame Table ---
+        function renderTable(fullBytes) {
+            displays.frameTableBody.innerHTML = '';
+            displays.frameCount.innerText = `${generatedFrames.length} Frames`;
+            
+            generatedFrames.forEach((frame, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = `border-b border-slate-700/50 hover:bg-slate-800/80 cursor-pointer transition-colors frame-item ${idx === selectedFrameIndex ? 'active' : ''}`;
+                tr.onclick = () => updateBitViz(idx);
+
+                let typeLabel = "";
+                if(currentVersion === 1) {
+                    typeLabel = frame.isBegin 
+                    ? `<span class="bg-rose-900/40 text-rose-300 px-2 py-0.5 rounded text-[10px] border border-rose-800">BEGIN</span>` 
+                    : `<span class="bg-slate-800 text-slate-400 px-2 py-0.5 rounded text-[10px] border border-slate-700">MORE</span>`;
+                } else {
+                    typeLabel = `<div class="flex gap-1">`;
+                    if(frame.isBegin) typeLabel += `<span class="bg-green-900/40 text-green-300 px-1 rounded text-[10px] border border-green-800">BEG</span>`;
+                    if(frame.isEnd) typeLabel += `<span class="bg-red-900/40 text-red-300 px-1 rounded text-[10px] border border-red-800">END</span>`;
+                    if(!frame.isBegin && !frame.isEnd) typeLabel += `<span class="text-slate-500 text-[10px]">-</span>`;
+                    typeLabel += `</div>`;
+                }
+
+                const hexId = "0x" + frame.canId.toString(16).toUpperCase().padStart(8, '0');
+                
+                let dlc = 0;
+                if (frame.isBegin) {
+                    const hdrSize = currentVersion === 1 ? 6 : 4; 
+                    dlc = hdrSize + frame.dataLen;
+                } else {
+                    dlc = frame.dataLen;
+                }
+
+                let payloadHtml = '<div class="flex items-center gap-1 overflow-hidden">';
+                if (frame.isBegin) {
+                    if (currentVersion === 1) {
+                        frame.headerBytes.forEach(byte => {
+                             payloadHtml += `<div class="w-8 h-6 bg-yellow-600 border border-yellow-500 rounded text-[10px] text-white flex items-center justify-center font-bold" title="CSP Header">0x${byte.toString(16).toUpperCase().padStart(2,'0')}</div>`;
+                        });
+                        frame.lengthBytes.forEach((byte, i) => {
+                            payloadHtml += `<div class="w-8 h-6 bg-purple-600 border border-purple-500 rounded text-[10px] text-white flex items-center justify-center font-bold" title="Length Byte">0x${byte.toString(16).toUpperCase().padStart(2,'0')}</div>`;
+                        });
+                    } else {
+                        frame.headerBytes.forEach(byte => {
+                             payloadHtml += `<div class="w-8 h-6 bg-yellow-600 border border-yellow-500 rounded text-[10px] text-white flex items-center justify-center font-bold" title="Payload Header">0x${byte.toString(16).toUpperCase().padStart(2,'0')}</div>`;
+                        });
+                    }
+                }
+
+                const chunkBytes = fullBytes.slice(frame.dataStart, frame.dataStart + frame.dataLen);
+                for(let b of chunkBytes) {
+                    payloadHtml += `<div class="w-8 h-6 bg-slate-700 border border-slate-600 rounded text-[10px] text-slate-300 flex items-center justify-center font-mono">0x${b.toString(16).toUpperCase().padStart(2,'0')}</div>`;
+                }
+                payloadHtml += '</div>';
+
+                tr.innerHTML = `
+                    <td class="px-4 py-3 font-mono text-slate-400">${idx}</td>
+                    <td class="px-4 py-3">${typeLabel}</td>
+                    <td class="px-4 py-3 font-mono text-cyan-400">${hexId}</td>
+                    <td class="px-4 py-3 text-center font-mono text-white">${dlc}</td>
+                    <td class="px-4 py-3">${payloadHtml}</td>
+                `;
+                displays.frameTableBody.appendChild(tr);
+            });
+        }
+
+        function updateBitViz(index) {
+            selectedFrameIndex = index;
+            const frame = generatedFrames[index];
+            if(!frame) return;
+
+            document.querySelectorAll('.frame-item').forEach((el, i) => {
+                if(i === index) el.classList.add('active');
+                else el.classList.remove('active');
+            });
+
+            // Update Frame Info and Large ID
+            const typeStr = frame.isBegin ? 'BEGIN' : (frame.isEnd ? 'END' : 'MORE');
+            displays.currentFrameInfo.innerText = `Frame ${index} (${typeStr})`;
+            displays.largeCanId.innerText = "0x" + frame.canId.toString(16).toUpperCase().padStart(8, '0');
+
+            // Render CAN ID
+            const map = (currentVersion === 1) ? CAN_ID_V1 : CAN_ID_V2;
+            renderGrid(displays.canIdGrid, BigInt(frame.canId), map, 29);
+        }
+
+        // --- Helpers for Input ---
+        function toggleHexMode() {
+            isHexMode = inputs.hexToggle.checked;
+            const inputFields = [inputs.srcAddr, inputs.dstAddr, inputs.srcPort, inputs.dstPort];
+            inputFields.forEach(input => {
+                const currentVal = isHexMode ? parseInt(input.value, 10) : parseInt(input.value, 16);
+                if (!isNaN(currentVal)) {
+                    input.value = isHexMode ? "0x" + currentVal.toString(16).toUpperCase() : currentVal.toString(10);
+                }
+            });
+            const payloadRaw = inputs.payload.value;
+            if (isHexMode) {
+                const encoder = new TextEncoder();
+                const bytes = encoder.encode(payloadRaw);
+                let hexStr = "";
+                bytes.forEach(b => hexStr += b.toString(16).toUpperCase().padStart(2, '0') + " ");
+                inputs.payload.value = hexStr.trim();
+                displays.payloadModeHint.innerText = "Hex Bytes (e.g. AA BB 12)";
+                displays.payloadModeHint.className = "text-[10px] text-blue-400 font-bold";
+            } else {
+                const cleanHex = payloadRaw.replace(/0x/g, '').replace(/[^0-9A-Fa-f]/g, '');
+                if (cleanHex.length % 2 !== 0) {
+                     inputs.payload.value = "[Hex Conversion Error]";
+                } else {
+                    const bytes = new Uint8Array(cleanHex.length / 2);
+                    for (let i = 0; i < cleanHex.length; i += 2) bytes[i / 2] = parseInt(cleanHex.substring(i, i + 2), 16);
+                    const decoder = new TextDecoder();
+                    inputs.payload.value = decoder.decode(bytes);
+                }
+                displays.payloadModeHint.innerText = "Text Mode";
+                displays.payloadModeHint.className = "text-[10px] text-slate-500";
+            }
+            recalcFrames();
+        }
+
+        function getNumericValue(input) {
+            const val = input.value.trim();
+            if (val.startsWith("0x") || val.startsWith("0X")) return parseInt(val, 16);
+            if (isHexMode) return parseInt(val, 16);
+            return parseInt(val, 10);
+        }
+
+        function setNumericValue(input, num) {
+            input.value = isHexMode ? "0x" + num.toString(16).toUpperCase() : num.toString(10);
+        }
+
+        function getPayloadBytes() {
+            const raw = inputs.payload.value.trim();
+            if (isHexMode) {
+                const clean = raw.replace(/0x/g, '').replace(/[^0-9A-Fa-f]/g, '');
+                if (clean.length === 0) return new Uint8Array(0);
+                const finalHex = (clean.length % 2 !== 0) ? clean + "0" : clean;
+                const bytes = new Uint8Array(finalHex.length / 2);
+                for (let i = 0; i < finalHex.length; i += 2) bytes[i / 2] = parseInt(finalHex.substring(i, i + 2), 16);
+                return bytes;
+            } else {
+                return new TextEncoder().encode(raw);
+            }
+        }
+
+        function addEventListeners() {
+            Object.values(inputs).forEach(input => input.addEventListener('input', recalcFrames));
+            inputs.hexToggle.addEventListener('change', toggleHexMode);
+        }
+
+        init();
+        function init() {
+            addEventListeners();
+            setVersion(1);
+        }
+
+    </script>
+</body>
+</html>
